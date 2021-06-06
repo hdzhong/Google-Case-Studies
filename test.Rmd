@@ -1,0 +1,295 @@
+---
+title: "Case Study 1: How Does a Bike-Share Navigate Speedy Success?"
+author: "Douglas Zhong"
+date: "6/4/2021"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# Scenario Introduction - sourced from Google Data Analytics Certificate program
+
+You are a junior data analyst working in the marketing analyst team at Cyclistic, a bike-share company in Chicago. The director of marketing believes the company’s future success depends on maximizing the number of annual memberships. Therefore, your team wants to understand how casual riders and annual members use Cyclistic bikes differently. From these insights, your team will design a new marketing strategy to convert casual riders into annual members. But first, Cyclistic executives must approve your recommendations, so they must be backed up with compelling data insights and professional data visualizations
+
+## About the company
+
+In 2016, Cyclistic launched a successful bike-share oƸering. Since then, the program has grown to a fleet of 5,824 bicycles that are geotracked and locked into a network of 692 stations across Chicago. The bikes can be unlocked from one station and returned to any other station in the system anytime.
+
+Until now, Cyclistic’s marketing strategy relied on building general awareness and appealing to broad consumer segments. One approach that helped make these things possible was the flexibility of its pricing plans: single-ride passes, full-day passes, and annual memberships. Customers who purchase single-ride or full-day passes are referred to as casual riders. Customers who purchase annual memberships are Cyclistic members.
+
+Cyclistic’s finance analysts have concluded that annual members are much more profitable than casual riders. Although the pricing flexibility helps Cyclistic attract more customers, Moreno believes that maximizing the number of annual members will be key to future growth. Rather than creating a marketing campaign that targets all-new customers, Moreno believes there is a very good chance to convert casual riders into members. She notes that casual riders are already aware of the Cyclistic program and have chosen Cyclistic for their mobility needs.
+
+Moreno has set a clear goal: Design marketing strategies aimed at converting casual riders into annual members. In order to do that, however, the marketing analyst team needs to better understand how annual members and casual riders differ, why casual riders would buy a membership, and how digital media could aƸect their marketing tactics. Moreno and her team are interested in analyzing the Cyclistic historical bike trip data to identify trends
+
+# Main Business Question
+* How do annual members and casual riders use Cyclistic bikes differently?
+
+### Guiding Questions
+* What is the problem you are trying to solve?
+  + Determine what the trends within the entire Cyclistic biking population, as well as within the casual group and members group
+  + Identify if there is a population of casual riders that can actually benefit from converting to a membership without further incentives
+  
+* How can your insights drive business decisions?
+  + If we identify strong trends, we can create marketing strategies that take advantages of these trends to convert casual riders to members
+
+## Collecting the data
+
+As Cyclistic is a fictional company, we will be using an existing open-source data set to simulate the data. Here use the data available from Divvy Bike Sharing from the months of April 2020 to April 2021. 
+
+## Preparing the Data
+
+Initially I was going to perform the beginnings of my analysis on Excel but the file sizes exceeded what my computer and Excel could handle. I also looked into using BigQuery as a platform for my initial analysis but that was also not capable of handling data this size on a free account. As such, I decided to use R and Rstudio for my entire analysis.
+
+
+```{r install extra packages, echo = FALSE}
+# install.packages("directlabels")
+# install.packages("kableExtra")
+# install.packages("ggshadow")
+# install.packages("formattable")
+```
+
+# Load all our packages
+```{r load packages}
+library(tidyverse)  #helps wrangle data
+library(lubridate)  #helps wrangle date attributes
+library(ggplot2)  #helps visualize data
+library(skimr) # for quickly taking a look at the data
+library(dplyr)
+library("ggshadow")
+library("formattable")
+library(kableExtra)
+library(directlabels)
+```
+
+# Load and inspect the data
+
+```{r load and inspect, echo = FALSE}
+myfiles = list.files(path="Data", pattern="*.csv", full.names=TRUE)
+all_trips <- sapply(myfiles, read_csv, simplify=FALSE)
+```
+
+I noticed that for some months start_station_id and end_station_id were doubles, and sometimes they were characters in later months. I converted all of those types to characters to combine all the dataframes together
+```{r merge dataframe}
+all_trips <- all_trips %>%
+  map(~mutate(., start_station_id = as.character(start_station_id), end_station_id = as.character(end_station_id))) %>%
+  bind_rows()
+```
+
+
+# Preprocess the data
+
+We can remove some data as it does not help with our analysis. Latitude and longitudinal data is included in some earlier datasets but is removed in later months. If we want to analyze the data by grouping by days, months, or weeks, we create new date columns from the existing datetime information.
+
+```{r preprocess}
+# Remove lat and long as this data was dropped beginning in 2020
+all_trips <- all_trips %>%
+  select(-c(start_lat, start_lng, end_lat, end_lng))
+
+# Inspect the new table that has been created
+colnames(all_trips)  #List of column names
+nrow(all_trips)  #How many rows are in data frame?
+dim(all_trips)  #Dimensions of the data frame?
+head(all_trips)  #See the first 6 rows of data frame.  Also tail(qs_raw)
+str(all_trips)  #See list of columns and data types (numeric, character, etc)
+summary(all_trips)  #Statistical summary of data. Mainly for numerics
+
+# If we want to analyze the data by grouping by days, months, or weeks, we create new date columns from the existing datetime information
+
+all_trips$date <- as.Date(all_trips$started_at) #The default format is yyyy-mm-dd
+all_trips$month <- format(as.Date(all_trips$date), "%m")
+all_trips$day <- format(as.Date(all_trips$date), "%d")
+all_trips$year <- format(as.Date(all_trips$date), "%Y")
+all_trips$day_of_week <- format(as.Date(all_trips$date), "%A")
+
+# Add a "ride_length" calculation to all_trips (in seconds)
+all_trips$ride_length <- difftime(all_trips$ended_at,all_trips$started_at)
+
+# Convert "ride_length" from Factor to numeric so we can run calculations on the data
+is.factor(all_trips$ride_length)
+all_trips$ride_length <- as.numeric(as.character(all_trips$ride_length))
+is.numeric(all_trips$ride_length)
+
+# Assign ride length groups with context
+all_trips$group_length <- dplyr::case_when(all_trips$ride_length <900 ~ "Less 15 minutes", 
+                                           all_trips$ride_length <3600 ~"Less 1 hour",
+                                           all_trips$ride_length <7200 ~"Less 2 hour",
+                                           all_trips$ride_length <28800 ~"Less 8 hour",
+                                           all_trips$ride_length <86400 ~"Less 1 day",
+                                           all_trips$ride_length >=86400 ~"More than 1 day")
+
+# Preliminary count of all trips grouped by year and months
+divvy_count <- all_trips %>%
+  group_by(year,month) %>%
+  dplyr::summarise(totals=n()) 
+
+order_week <- c('Sunday', 'Monday', 'Tuesday', 'Wednesday','Thursday','Friday','Saturday')
+
+# Remove "bad" data
+# The dataframe includes a few hundred entries when bikes were taken out of docks and checked for quality by Divvy or ride_length was negative
+
+all_trips_v2 <- all_trips[!(all_trips$start_station_name == "HQ QR" | all_trips$ride_length<0),]
+all_trips_v2 <- filter(all_trips_v2, !is.na(ride_length))
+
+# Noticed that a lot of end station names were missing
+# Created 3 separate data frames, one with complete data only, one with the trips that have no end station, and one with ALL trips
+all_trips_missing_end <- filter(all_trips, is.na(end_station_name))
+all_trips_no_na <- filter(all_trips, !is.na(end_station_name))
+```
+
+# Analysis
+
+Now that our data is well organized and ready to be looked at.
+```{r analysis, echo=FALSE}
+# Start with a quick summary
+
+summary(all_trips_v2$ride_length)
+
+# Compare members and casual users
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = mean)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = median)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = max)
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual, FUN = min)
+
+# See the average ride time by each day for members vs casual users
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+
+# Notice that the days of the week are out of order. Let's fix that.
+all_trips_v2$day_of_week <- ordered(all_trips_v2$day_of_week, levels=c("Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"))
+
+# Now, let's run the average ride time by each day for members vs casual users
+aggregate(all_trips_v2$ride_length ~ all_trips_v2$member_casual + all_trips_v2$day_of_week, FUN = mean)
+
+# Table with rides grouped by length of ride
+
+table3 <- all_trips_v2 %>%
+  group_by(group_length,member_casual) %>%
+  summarise(totals=n(), .groups = 'drop') %>%
+  pivot_wider(names_from = member_casual, values_from = totals) %>%
+  mutate (Total =casual+member)%>%
+  mutate (casual_perc = (casual/ nrow(all_trips_v2)))%>%
+  mutate (member_perc = (member/ nrow(all_trips_v2)))
+
+func <- function(z) if (is.numeric(z)) sum(z) else ''
+sumrowtable3 <- as.data.frame(lapply(table3, func))
+sumrowtable3[1] <- "Total"
+
+
+table3$casual_perc <- percent(table3$casual_perc)
+table3$member_perc <- percent(table3$member_perc)
+
+
+table3 <- data.frame(table3)
+
+table3total <- rbind(table3, sumrowtable3)
+
+kbl(table3total, escape = F,caption = "Number of rides group by length",
+    col.names = c("Group","Casual","Member","Total","Casual","Member")) %>%
+  row_spec(dim(table3total)[1], bold = T) %>% # format last row
+  column_spec(1, bold = T)  %>%
+  kable_material(c("striped", "hover", "responsive"), full_width = F) %>%
+  add_header_above(c(" "=1, "Rows" = 3, "Percentage" = 2))
+
+# analyze ridership data by type and weekday
+all_trips_v2 %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%  #creates weekday field using wday()
+  group_by(member_casual, weekday) %>%  #groups by user type and weekday
+  summarise(number_of_rides = n() #calculates the number of rides and average duration
+            ,average_duration = mean(ride_length)) %>% # calculates the average duration
+  arrange(member_casual, weekday) # sorts
+```
+
+# Plots
+```{r plots, echo=FALSE}
+# Let's visualize the number of rides by rider type
+all_trips_v2 %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%
+  group_by(member_casual, weekday) %>%
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>%
+  arrange(member_casual, weekday)  %>%
+  ggplot(aes(x = weekday, y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge")
+
+# Let's create a visualization for average duration
+all_trips_v2 %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%
+  group_by(member_casual, weekday) %>%
+  summarise(number_of_rides = n()
+            ,average_duration = mean(ride_length)) %>%
+  arrange(member_casual, weekday)  %>%
+  ggplot(aes(x = weekday, y = average_duration, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  labs(title = "Number of Rides per Weekday", x = "# of Rides", y = "Weekday")
+
+# Most popular starting points (members + casual top 5 for each)
+all_trips_v2 %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%
+  group_by(member_casual, start_station_name) %>%
+  summarise(counts = n()) %>%
+  top_n(5) %>%
+  ggplot(aes(x = start_station_name, y = counts, fill = member_casual)) +
+  geom_col(position = "dodge")
+
+# Most popular starting points (casuals)
+all_trips_v2 %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%
+  filter(member_casual == "casual") %>%
+  group_by(start_station_name) %>%
+  summarise(counts = n()) %>%
+  top_n(10) %>%
+  ggplot(aes(x = start_station_name, y = counts)) +
+  geom_col(position = "dodge") + theme(axis.text.x = element_text(angle = 45, vjust = 0.65))
+
+# Most popular starting points (members)
+
+all_trips_v2 %>%
+  mutate(weekday = wday(started_at, label = TRUE)) %>%
+  filter(member_casual == "member") %>%
+  group_by(start_station_name) %>%
+  summarise(counts = n()) %>%
+  top_n(10) %>%
+  ggplot(aes(x = start_station_name, y = counts)) +
+  geom_col(position = "dodge") + theme(axis.text.x = element_text(angle = 45, vjust = 0.65))
+
+# Tables below borrowed from another project (https://www.kaggle.com/davidareso/cyclistic-case-study/code), shows number of rides using multiple lines
+
+order_week <- c('Sunday', 'Monday', 'Tuesday', 'Wednesday','Thursday','Friday','Saturday')
+
+table9 <- all_trips_v2 %>%
+  group_by( day_of_week,member_casual, month, year) %>%
+  dplyr::summarise(totals=n(), .groups = 'drop')
+
+
+# Calender style plot (avg # of rides per day of the week and member type)
+
+table6 <- all_trips_v2 %>%
+  group_by(member_casual, year, month, day_of_week) %>%
+  dplyr::summarise(number_of_rides = n() ,average_duration = mean(ride_length), .groups = 'drop')
+
+ggplot(table6,aes(x = factor(day_of_week, level = order_week), y = number_of_rides, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs( x = "Day of the week", y = "Average Duration",
+        title ="Average Number of rides per day of the week and Member Type", fill = "Member Type")  +
+  facet_wrap(~year+month)
+
+# Calender style plot (avg duration per day of the week and member type)
+
+table7 <- all_trips_v2 %>%
+  group_by(member_casual, year, month, day_of_week) %>%
+  dplyr::summarise(number_of_rides = n() ,average_duration = mean(ride_length), .groups = 'drop')
+
+ggplot(table7,aes(x = factor(day_of_week, level = order_week), y = average_duration, fill = member_casual)) +
+  geom_col(position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  labs( x = "Day of the week", y = "Average Duration",
+        title ="Average Number of rides per day of the week and Member Type", fill = "Member Type")  +
+  facet_wrap(~year+month)
+```
+
+
